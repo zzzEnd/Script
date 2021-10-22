@@ -1,0 +1,178 @@
+-- // Constants \\ --
+-- [ Services ] --
+local Services = setmetatable({}, {__index = function(Self, Index)
+	local NewService = game.GetService(game, Index)
+	if NewService then
+		Self[Index] = NewService
+	end
+	return NewService
+end})
+ 
+-- [ LocalPlayer ] --
+local LocalPlayer = Services.Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+ 
+-- [ Raycast Parameters ] --
+local RaycastParameters = RaycastParams.new()
+RaycastParameters.IgnoreWater = true
+RaycastParameters.FilterType = Enum.RaycastFilterType.Blacklist
+RaycastParameters.FilterDescendantsInstances = {LocalPlayer.Character}
+ 
+-- [ Drawing ] --
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Thickness = 2.5
+FOVCircle.Color = Color3.fromRGB(200, 200, 200)
+FOVCircle.NumSides = 25
+FOVCircle.Radius = 250
+ 
+-- [ Metatable ] --
+local RawMetatable = getrawmetatable(game)
+local __NameCall = RawMetatable.__namecall
+local __Index = RawMetatable.__index
+ 
+-- // Variables \\ --
+-- [ Info ] --
+local SilentAIMEnabled = true
+local TeamCheck = true
+local VisibilityCheck = true
+ 
+local Settings = {
+    Enabled = true;
+    Target = "Head";
+    Targets = {
+        ["Head"] = 25;
+        ["HumanoidRootPart"] = 50;
+    };
+    FOV = 250;
+    FOVCircle = true;
+}
+ 
+-- [ Closest ] --
+local Target = nil
+ 
+-- // Functions \\ --
+local function ValidCharacter(Character)
+    return Character and (Character:FindFirstChildWhichIsA("Humanoid") and Character:FindFirstChildWhichIsA("Humanoid").Health ~= 0) or false
+end
+ 
+local function NotObstructing(Destination, Ancestor)
+    -- [ Camera ] --
+    local ObstructingParts = Camera:GetPartsObscuringTarget({Destination}, {Ancestor, LocalPlayer.Character})
+ 
+    for i,v in ipairs(ObstructingParts) do
+        pcall(function()
+            if v.Transparency >= 1 then
+                table.remove(ObstructingParts, i)
+            end
+        end)
+    end
+ 
+    if #ObstructingParts <= 0 then
+        return true
+    end
+ 
+    -- [ Raycast ] --
+    RaycastParameters.FilterDescendantsInstances = {LocalPlayer.Character}
+ 
+    local Origin = Camera.CFrame.Position
+    local Direction = (Destination - Origin).Unit * 500
+    local RayResult = workspace:Raycast(Origin, Direction, RaycastParameters) or {
+        Instance = nil;
+        Position = Origin + Direction;
+        Material = Enum.Material.Air;
+    }
+ 
+    if RayResult.Instance and (RayResult.Instance:IsDescendantOf(Ancestor) or RayResult.Instance == Ancestor) then
+        return true
+    end
+ 
+    -- [ Obstructed ] --
+    return false
+end
+ 
+local function ClosestPlayerToCursor(Distance)
+    local MousePosition = Services.UserInputService:GetMouseLocation()
+    local Closest = nil
+    local ShortestDistance = Distance or math.huge
+    for i, v in ipairs(Services.Players:GetPlayers()) do
+        if v ~= LocalPlayer and ValidCharacter(v.Character) and (not TeamCheck or v.Team ~= LocalPlayer.Team) then
+            local ViewportPosition, OnScreen = Camera:WorldToViewportPoint(v.Character.PrimaryPart.Position)
+            local Magnitude = (Vector2.new(ViewportPosition.X, ViewportPosition.Y) - MousePosition).Magnitude
+            if OnScreen == true and Magnitude < ShortestDistance and (not VisibilityCheck or NotObstructing(v.Character[Settings.Target].Position, v.Character)) then
+                Closest = v
+                ShortestDistance = Magnitude
+            end
+        end
+    end
+    return Closest
+end
+ 
+-- // Metatable \\ --
+setreadonly(RawMetatable, false)
+ 
+RawMetatable.__namecall = newcclosure(function(Object, ...)
+    local Arguments = {...}
+    local Method = getnamecallmethod()
+ 
+    if SilentAIMEnabled == true and checkcaller() == false then
+        if Target then
+            if Object == Camera then
+                if Method == "GetRenderCFrame" then
+                    return CFrame.new(Camera.CFrame.Position, Target.Character[Settings.Target].Position)
+                elseif Method == "ViewportPointToRay" then
+                    return Ray.new(Camera.CFrame.Position, (Target.Character[Settings.Target].Position - Camera.CFrame.Position).Unit)
+                elseif Method == "ScreenPointToRay" then
+                    return Ray.new(Camera.CFrame.Position, (Target.Character[Settings.Target].Position - Camera.CFrame.Position).Unit)
+                end
+            elseif Object == Services.UserInputService then
+                if Method == "GetMouseLocation" then
+                    local ViewportPoint = Camera.WorldToViewportPoint(Camera, Target.Character[Settings.Target].Position)
+                    return Vector2.new(ViewportPoint.X, ViewportPoint.Y)
+                end
+            end
+        end
+    end
+ 
+    return __NameCall(Object, unpack(Arguments))
+end)
+ 
+RawMetatable.__index = newcclosure(function(Self, Index)
+    if SilentAIMEnabled == true and checkcaller() == false then
+        if Target then
+            if Self == Camera then
+                if Index == "CFrame" and (getfenv(2).script.Parent ~= nil and not table.find({"ControlModule", "CameraModule"}, tostring(getfenv(2).script))) then
+                    return CFrame.new(Camera.CFrame.Position, Target.Character[Settings.Target].Position)
+                end
+            elseif typeof(Self) == "Instance" and (Self:IsA("PlayerMouse") or Self:IsA("Mouse")) then
+                if Index == "Hit" then
+                    return Target.Character[Settings.Target].CFrame
+                elseif Index == "Origin" then
+                    return CFrame.new(Camera.CFrame.Position, Target.Character[Settings.Target].Position)
+                elseif Index == "Target" then
+                    return Target.Character[Settings.Target]
+                elseif Index == "UnitRay" then
+                    return Ray.new(Camera.CFrame.Position, (Target.Character[Settings.Target].Position - Camera.CFrame.Position).Unit)
+                elseif tostring(Index):lower() == "x" then
+                    local ViewportPoint = Camera:WorldToViewportPoint(Target.Character[Settings.Target].Position)
+                    return ViewportPoint.X
+                elseif tostring(Index):lower() == "y" then
+                    local ViewportPoint = Camera:WorldToViewportPoint(Target.Character[Settings.Target].Position)
+                    return ViewportPoint.Y
+                end
+            end
+        end
+    end
+    return __Index(Self, Index)
+end)
+ 
+setreadonly(RawMetatable, true)
+ 
+-- // Event Listeners \\ --
+Services.RunService.RenderStepped:Connect(function()
+    Target = ClosestPlayerToCursor(Settings.FOV or 250)
+ 
+    -- [ Drawing ] --
+    FOVCircle.Visible = not not Settings.Enabled and SilentAIMEnabled
+    FOVCircle.Radius = Settings.FOV
+    FOVCircle.Position = Services.UserInputService:GetMouseLocation()
+end)
